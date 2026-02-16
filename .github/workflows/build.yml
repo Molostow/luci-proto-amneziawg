@@ -57,16 +57,15 @@ jobs:
         rm -f "$file_name"
         mv openwrt-sdk* openwrt
 
-        # --- ГЛАВНОЕ ИСПРАВЛЕНИЕ: Копируем исходники в папку package/ ---
+        # Создаем папку для пакета и копируем файлы, исключая SDK
         mkdir -p openwrt/package/luci-proto-amneziawg
-        # Копируем все файлы из корня репозитория в папку пакета внутри SDK
-        cp -r ./* openwrt/package/luci-proto-amneziawg/
-        
-        # Заходим в SDK и обновляем стандартные фиды
+        rsync -av --exclude='openwrt' --exclude='.git' ./ openwrt/package/luci-proto-amneziawg/
+
+        # Заходим в SDK и обновляем фиды
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-        
+
         # Генерируем конфиг и явно включаем наш пакет
         make defconfig
         echo "CONFIG_PACKAGE_luci-proto-amneziawg=m" >> .config
@@ -76,14 +75,14 @@ jobs:
       run: |
         set -e -x
         cd openwrt
-        # Собираем только наш пакет по его новому пути
+        # Собираем только наш пакет
         make package/luci-proto-amneziawg/compile -j$(nproc) V=s
 
     - name: Prepare artifacts for upload
       run: |
         set -e -x
         mkdir -p release
-        # Ищем готовый .ipk файл в директории bin/
+        # Ищем готовый .ipk файл в bin/
         find openwrt/bin -name "luci-proto-amneziawg*.ipk" -exec cp {} release/ \;
 
     - name: Upload the compiled package
