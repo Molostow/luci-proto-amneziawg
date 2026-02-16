@@ -32,11 +32,16 @@ jobs:
     - name: Checkout repository source
       uses: actions/checkout@v4
 
+    - name: Patch Makefile to remove luci-lib-uqr dependency
+      run: |
+        set -e -x
+        # Заменяем DEPENDS в Makefile пакета
+        sed -i 's/+luci-lib-uqr/+luci-base/' Makefile
+
     - name: Download and prepare OpenWrt SDK
       run: |
         set -e -x
 
-        # Определяем URL SDK
         if [ "${{ inputs.openwrt_version }}" = "SNAPSHOT" ]; then
           base_url="https://downloads.openwrt.org/snapshots/targets/${{ inputs.openwrt_target }}/${{ inputs.openwrt_subtarget }}/"
         else
@@ -50,23 +55,19 @@ jobs:
           exit 1
         fi
 
-        # Скачиваем и распаковываем SDK
         curl -fsLO "$base_url$sdk_url"
         file_name=$(basename "$sdk_url")
         tar -xf "$file_name"
         rm -f "$file_name"
         mv openwrt-sdk* openwrt
 
-        # Создаем папку для пакета и копируем файлы, исключая SDK
         mkdir -p openwrt/package/luci-proto-amneziawg
         rsync -av --exclude='openwrt' --exclude='.git' ./ openwrt/package/luci-proto-amneziawg/
 
-        # Заходим в SDK и обновляем фиды
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-        # Генерируем конфиг и явно включаем наш пакет
         make defconfig
         echo "CONFIG_PACKAGE_luci-proto-amneziawg=m" >> .config
         make defconfig
@@ -75,14 +76,12 @@ jobs:
       run: |
         set -e -x
         cd openwrt
-        # Собираем только наш пакет
         make package/luci-proto-amneziawg/compile -j$(nproc) V=s
 
     - name: Prepare artifacts for upload
       run: |
         set -e -x
         mkdir -p release
-        # Ищем готовый .ipk файл в bin/
         find openwrt/bin -name "luci-proto-amneziawg*.ipk" -exec cp {} release/ \;
 
     - name: Upload the compiled package
