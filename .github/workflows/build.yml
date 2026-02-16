@@ -32,76 +32,66 @@ jobs:
     - name: Checkout this repository
       uses: actions/checkout@v4
 
-    - name: Checkout LuCI base
-      uses: actions/checkout@v4
-      with:
-        path: luci
-        repository: openwrt/luci
-
     - name: Download and prepare SDK
       run: |
         set -e -x
 
-        # ---- FIX Git network stability ----
-        git config --global http.version HTTP/1.1
-        git config --global http.postBuffer 524288000
-        git config --global http.lowSpeedLimit 0
-        git config --global http.lowSpeedTime 999999
-        git config --global core.compression 0
-        # -----------------------------------
-
+        # ---- Определяем URL SDK ----
         if [ "${{ inputs.openwrt_version }}" = "SNAPSHOT" ]; then
           base_url="https://downloads.openwrt.org/snapshots/targets/${{ inputs.openwrt_target }}/${{ inputs.openwrt_subtarget }}/"
         else
           base_url="https://downloads.openwrt.org/releases/${{ inputs.openwrt_version }}/targets/${{ inputs.openwrt_target }}/${{ inputs.openwrt_subtarget }}/"
         fi
 
+        # Парсим имя файла SDK
         sdk_url=$(curl -s "${base_url}" | grep -oP 'href="openwrt-sdk[^"]+\.tar\.(zst|xz)"' | sed -e 's/href="//' -e 's/"$//' | head -n1)
 
         if [[ -z "$sdk_url" ]]; then
-          echo "SDK file not found."
+          echo "SDK file not found!"
           exit 1
         fi
 
+        # Скачиваем и распаковываем
         curl -fsLO "$base_url$sdk_url"
         file_name=$(basename "$sdk_url")
         tar -xf "$file_name"
         rm -f *.tar.zst *.tar.xz
+        
+        # Переименовываем папку SDK в просто 'openwrt'
         mv openwrt-sdk* openwrt
 
-        # Create package directory and copy files
-        mkdir -p openwrt/feeds/luci/proto
-        cp -r htdocs root po Makefile openwrt/feeds/luci/proto/
-        cp -r luci/.git openwrt/feeds/luci/
+        # ---- ГЛАВНОЕ ИСПРАВЛЕНИЕ: Копируем пакет в папку package/ ----
+        mkdir -p openwrt/package/luci-proto-amneziawg
+        
+        # Копируем исходники из корня репозитория в папку пакета в SDK
+        # Предполагается, что Makefile, htdocs и прочее лежат в корне вашего репозитория
+        cp -r Makefile htdocs root po openwrt/package/luci-proto-amneziawg/ || echo "Warning: some files might be missing"
 
-        # Update feeds
-        echo "src-link luci_sync ./luci" >> openwrt/feeds.conf.default
+        # Обновляем стандартные фиды (чтобы подтянуть зависимости LuCI)
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-        for i in 1 2 3; do
-          ./openwrt/scripts/feeds update -a && break
-          echo "Feeds update failed, retry $i..."
-          sleep 15
-        done
-
-        ./openwrt/scripts/feeds install -a
-
-        # Configure
-        curl -fsL "$base_url/config.buildinfo" > openwrt/.config
-        echo "CONFIG_PACKAGE_luci-proto-amneziawg=y" >> openwrt/.config
-        echo "CONFIG_LUCI_LANG_ru=y" >> openwrt/.config
-        make -C openwrt defconfig
+        # Настраиваем конфиг
+        make defconfig
+        
+        # Включаем наш пакет
+        echo "CONFIG_PACKAGE_luci-proto-amneziawg=m" >> .config
+        make defconfig
 
     - name: Build package
       run: |
         set -e -x
         cd openwrt
-        make package/feeds/luci/luci-proto-amneziawg/{clean,download,prepare,compile} -j $(nproc) V=s
+        # Собираем только наш пакет
+        make package/luci-proto-amneziawg/compile -j$(nproc) V=s
 
     - name: Prepare artifacts
       run: |
         set -e -x
         mkdir release
-        find "openwrt/bin/packages/${{ inputs.openwrt_arch }}/luci" -name "luci-proto-amneziawg*.ipk" -exec cp {} release \;
+        # Ищем готовый ipk файл по всей папке bin
+        find openwrt/bin -name "luci-proto-amneziawg*.ipk" -exec cp {} release \;
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
