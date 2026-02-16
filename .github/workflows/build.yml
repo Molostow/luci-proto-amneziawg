@@ -29,78 +29,64 @@ jobs:
     name: "Build ${{ inputs.openwrt_arch }} - ${{ inputs.openwrt_target }}/${{ inputs.openwrt_subtarget }}"
     runs-on: ubuntu-22.04
     steps:
-    - name: Checkout this repository
+    - name: Checkout repository source
       uses: actions/checkout@v4
 
-    - name: Checkout LuCI 23.05
-      uses: actions/checkout@v4
-      with:
-        path: luci
-        repository: openwrt/luci
-        ref: openwrt-23.05      # <-- ИСПРАВЛЕНИЕ
-
-    - name: Download and prepare SDK
+    - name: Download and prepare OpenWrt SDK
       run: |
         set -e -x
-        
-        # ---- Определяем URL SDK ----
+
+        # Определяем URL SDK
         if [ "${{ inputs.openwrt_version }}" = "SNAPSHOT" ]; then
           base_url="https://downloads.openwrt.org/snapshots/targets/${{ inputs.openwrt_target }}/${{ inputs.openwrt_subtarget }}/"
         else
           base_url="https://downloads.openwrt.org/releases/${{ inputs.openwrt_version }}/targets/${{ inputs.openwrt_target }}/${{ inputs.openwrt_subtarget }}/"
         fi
 
-        # Парсим имя файла SDK
-        sdk_url=$(curl -s "${base_url}" | grep -oP 'href="openwrt-sdk[^"]+\.tar\.(zst|xz)"' | sed -e 's/href="//' -e 's/"$//' | head -n1)
+        sdk_url=$(curl -s "${base_url}" | grep -oP 'href="openwrt-sdk[^"]+\.tar\.(xz)"' | sed -e 's/href="//' -e 's/"$//' | head -n1)
 
         if [[ -z "$sdk_url" ]]; then
           echo "SDK file not found!"
           exit 1
         fi
 
-        # Скачиваем и распаковываем
+        # Скачиваем и распаковываем SDK
         curl -fsLO "$base_url$sdk_url"
         file_name=$(basename "$sdk_url")
         tar -xf "$file_name"
-        rm -f *.tar.zst *.tar.xz
-        
-        # Переименовываем папку SDK в просто 'openwrt'
+        rm -f "$file_name"
         mv openwrt-sdk* openwrt
 
-        # ---- ГЛАВНОЕ ИСПРАВЛЕНИЕ: Копируем пакет в папку package/ ----
+        # --- ГЛАВНОЕ ИСПРАВЛЕНИЕ: Копируем исходники в папку package/ ---
         mkdir -p openwrt/package/luci-proto-amneziawg
+        # Копируем все файлы из корня репозитория в папку пакета внутри SDK
+        cp -r ./* openwrt/package/luci-proto-amneziawg/
         
-        # Копируем исходники из корня репозитория в папку пакета в SDK
-        # Предполагается, что Makefile, htdocs и прочее лежат в корне вашего репозитория
-        cp -r Makefile htdocs root po openwrt/package/luci-proto-amneziawg/ || echo "Warning: some files might be missing"
-
-        # Обновляем стандартные фиды (чтобы подтянуть зависимости LuCI)
+        # Заходим в SDK и обновляем стандартные фиды
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
-        # Настраиваем конфиг
-        make defconfig
         
-        # Включаем наш пакет
+        # Генерируем конфиг и явно включаем наш пакет
+        make defconfig
         echo "CONFIG_PACKAGE_luci-proto-amneziawg=m" >> .config
         make defconfig
 
-    - name: Build package
+    - name: Build the package
       run: |
         set -e -x
         cd openwrt
-        # Собираем только наш пакет
+        # Собираем только наш пакет по его новому пути
         make package/luci-proto-amneziawg/compile -j$(nproc) V=s
 
-    - name: Prepare artifacts
+    - name: Prepare artifacts for upload
       run: |
         set -e -x
-        mkdir release
-        # Ищем готовый ipk файл по всей папке bin
-        find openwrt/bin -name "luci-proto-amneziawg*.ipk" -exec cp {} release \;
+        mkdir -p release
+        # Ищем готовый .ipk файл в директории bin/
+        find openwrt/bin -name "luci-proto-amneziawg*.ipk" -exec cp {} release/ \;
 
-    - name: Upload artifacts
+    - name: Upload the compiled package
       uses: actions/upload-artifact@v4
       with:
         name: luci-proto-amneziawg-${{ inputs.openwrt_version }}_${{ inputs.openwrt_arch }}
