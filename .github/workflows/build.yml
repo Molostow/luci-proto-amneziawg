@@ -32,10 +32,17 @@ jobs:
     - name: Checkout this repository
       uses: actions/checkout@v4
 
+    - name: Checkout LuCI 23.05
+      uses: actions/checkout@v4
+      with:
+        path: luci
+        repository: openwrt/luci
+        ref: openwrt-23.05      # <-- ИСПРАВЛЕНИЕ
+
     - name: Download and prepare SDK
       run: |
         set -e -x
-
+        
         # ---- Определяем URL SDK ----
         if [ "${{ inputs.openwrt_version }}" = "SNAPSHOT" ]; then
           base_url="https://downloads.openwrt.org/snapshots/targets/${{ inputs.openwrt_target }}/${{ inputs.openwrt_subtarget }}/"
